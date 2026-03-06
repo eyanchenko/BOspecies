@@ -3,17 +3,15 @@
 # March 6, 2026
 
 
-A <- B <- list()
+A <- list()
 
-for(i in 1:5){
+for(i in 1:3){
   A[[i]] <- matrix(runif(5*2, 0, 10), nrow=5)
-  B[[i]] <- matrix(runif(5*2, 0, 10), nrow=5)
 }
 
 # Computes the kernel matrix for EMD
 # A is a list where each entry in the list is the location
 # of the k sites
-# Row of A is the sites included in the set
 # Number of rows is number of sets
 computeK <- function(A, weights=c("equal", "loc")){
   
@@ -48,3 +46,6 @@ computeK <- function(A, weights=c("equal", "loc")){
   return(K)
   
 }
+
+
+# MCMC sampler for beta0 and sigma2
