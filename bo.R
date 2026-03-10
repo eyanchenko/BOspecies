@@ -3,18 +3,11 @@
 # March 6, 2026
 library(extraDistr)
 
-A <- list()
-
-for(i in 1:3){
-  A[[i]] <- matrix(runif(5*2, 0, 10), nrow=5)
-}
-
-# Computes the kernel matrix for EMD
-# Uses exponential kernel
+# Computes the kernel matrix
+# Uses exponential kernel where distance is EMD
 # X is a list where each entry in the list is the location
-# of the k sites
-# Could also add other covariates with the locations here
-# Number of rows is number of sets
+# of the k sites (allows for other covariates with the locations here)
+# Number of entries in X is number of sets
 computeK <- function(X, weights=c("equal", "loc"), lambda=1, rho=1){
   
   n = length(X) 
@@ -51,9 +44,8 @@ computeK <- function(X, weights=c("equal", "loc"), lambda=1, rho=1){
   
 }
 
-
 # MCMC sampler for beta0 and sigma2
-mcmc <- function(Y, K, mc_burn = 1000, mc_iters = 5000){
+mcmc <- function(Y, K, mc_burn = 1000, mc_iters = 1000){
   N         <- length(Y)
   Vinv  <- solve(K + diag(N))
   Vsum <- sum(Vinv)
@@ -107,7 +99,6 @@ new_cov <- function(xstar, X, K, weights=c("equal", "loc"), W, lambda, rho){
   )
 }
 
-
 # Convert mean and cov for new point
 mean_cov <- function(xstar, X, Y, beta0, sigma2, K, weights=c("equal", "loc"), W, lambda=1, rho=1){
   N <- ncol(K)
@@ -121,7 +112,6 @@ mean_cov <- function(xstar, X, Y, beta0, sigma2, K, weights=c("equal", "loc"), W
   
   return(list(mu=mu, sd=sd))
 }
-
 
 # Calculate Expected improvement
 AEI <- function(xstar, X, Y, ystar, beta0, sigma2, K, weights=c("equal", "loc"), W, lambda=1, rho=1){
@@ -138,11 +128,23 @@ AEI <- function(xstar, X, Y, ystar, beta0, sigma2, K, weights=c("equal", "loc"),
   
 }
 
-
 # Greedy function to maximize AEI
-# CHANGE SO THAT IT CAN'T VISIT SOMEWHERE IT'S ALREADY BEEN
-# ADD AN INPUT OF PREVIOUS VISITED SETS
-greedy <- function(locs, X, k, ystar, beta0, sigma2, K, weights, W, lambda, rho){
+greedy <- function(locs, X, Y, V, k, ystar, beta0, sigma2, K, weights, W, lambda, rho){
+  
+  
+  # True if candidate set, x, has already been evaluated. False otherwise
+  # Could probably figure out a way to speed this up
+  # Like have a separate data structure which just holds site numbers of sets
+  check_fun <- function(x){
+    x <- sort(x)
+    
+    apply_fun <- function(Vj){
+      return(sum(x==Vj)==k)
+    }
+    
+    sum(unlist(apply(V, 1, apply_fun))) > 0 
+    
+  }
   
   # Initialize set of sites
   L <- nrow(locs)
@@ -163,9 +165,16 @@ greedy <- function(locs, X, k, ystar, beta0, sigma2, K, weights, W, lambda, rho)
       
       for(j in idx){
         xtry <- xstar
+        xtry_id <- xstar_id
+        
         # Swap current ith site with all other sites
         xtry[i,] <- locs[j, ]
-        aei_try <- AEI(xtry, X, Y, ystar, beta0, sigma2, K, weights, W, lambda, rho)
+        xtry_id[i] <- j
+        
+        
+        # Check if we have already sampled this set
+        ifelse(check_fun(xtry_id), aei_try <- -Inf, aei_try <- AEI(xtry, X, Y, ystar, beta0, sigma2, K, weights, W, lambda, rho))
+        
         if(aei_try > aei_cur){
           aei_cur = aei_try
           xstar = xtry
@@ -176,21 +185,24 @@ greedy <- function(locs, X, k, ystar, beta0, sigma2, K, weights, W, lambda, rho)
     }
   }
   
-  return(xstar)
+  return(list(xstar=xstar, id=sort(xstar_id)))
 }
-
 
 # Main algorithm
 # f is objective function. Make sure inputs for it work lol
+# This seems to work!
 bayesopt <- function(f, locs, k, weights=c("equal", "loc"), N0=5, B=20, lambda=1, rho=1, mc_burn=1000, mc_iters=5000){
   
   L = nrow(locs) # total number of locations
   p = ncol(locs) # number of covariates at each site
   
   # Initial random sample
-  X <- list()
+  X <- list() # keeps track of covariates of sampled places
+  V <- matrix(0, nrow=N0+B, ncol = k)# keeps track of IDs of sampled places
   for(i in 1:N0){
-    X[[i]] <- locs[sample(1:L, k), ]
+    ids <- sort(sample(1:L, k))
+    X[[i]] <- locs[ids, ]
+    V[i, ] <- ids
   }
 
   # Evaluate objective function at each set
@@ -213,11 +225,14 @@ bayesopt <- function(f, locs, k, weights=c("equal", "loc"), N0=5, B=20, lambda=1
     ystar <- max(unlist(lapply(X, function(xxx){mean_cov(xxx, X, Y, b0, sigma2, K, weights, W, lambda, rho)$mu})))
     
     # Find set of locations which maximize AEI
-    xstar <- greedy(locs, X, k, ystar, b0, sigma2, K, weights, W, lambda, rho)
+    out <- greedy(locs, X, Y, V, k, ystar, b0, sigma2, K, weights, W, lambda, rho)
+    xstar = out$xstar
+    xstar_id = out$id
     
     # Append xstar and evaluate objective function
     Y <- c(Y, f(xstar)-meany)
     X[[N0+b]] <- xstar
+    V[N0+b, ] <- xstar_id
     
     # Update K and W
     out <- new_cov(xstar, X, K, weights, W, lambda, rho)
@@ -234,31 +249,45 @@ bayesopt <- function(f, locs, k, weights=c("equal", "loc"), N0=5, B=20, lambda=1
   # Select largest value
   yvec  <- unlist(lapply(X, function(xxx){mean_cov(xxx, X, Y, b0, sigma2, K, weights, W, lambda, rho)$mu}))
   idmx  <- which.max(yvec)
-  ystar <- yvec[idmx]
   xstar <- X[[idmx]]
   
-  return(xstar)
+  # Return trajectory
+  ytraj <- numeric(B+1)
+  ytraj[1] <- max(yvec[1:N0])
+  for(b in 1:B){ytraj[b+1] <- max(yvec[1:(N0+b)])}
+  
+  return(list(xstar=xstar, y=ytraj))
 }
-
-f(xstar)
-
 
 
 
 
 # All possible locations to choose from
 L = 500
-locs <- matrix(runif(L*2, -1, 1), nrow=L, ncol=2)
+locs <- matrix(runif(2*L, -1, 1), nrow=L, ncol=2)
 
 # Crazy objective function
 f <- function(x){
-  sin(12*x[1,1])*x[1,1]*x[2,1] + 0.5*x[1,1]^2*x[2,2] + cos(6*x[1,2]*x[2,2]) + x[2,1]*x[1,2]^3 + rnorm(1, 0, 0.01)
+  -sin(12*x[1,1])*x[1,1]*x[2,1] + 0.5*x[1,1]^3*x[2,2] + sin(6*x[1,2]*x[2,2]) - x[2,1]*x[1,2]^4 +
+    cos(x[3,1]*x[3,2])*x[1,2] + rnorm(1, 0, 0.01)
 }
 
-k = 2 # number of sites considered in each set
 
 
+f(locs[sample(1:L, 3), ])
 
+k = 3 # number of sites considered in each set
+
+
+out <- bayesopt(f, locs, 3, "loc", N0=5, B=25)
+f(out$xstar)
+plot(out$y, type="l")
+
+
+x <- numeric(10); for(i in 1:10){x[i] <- f(bayesopt(f, locs, 3, "loc", N0=5, B=10)$xstar)}; mean(x) # Optimal input
+z <- numeric(100); for(i in 1:100){z[i] <- f(locs[sample(1:L, k),])}; mean(z) # Average over random inputs
+
+# So we are doing significantly better than random guessing. Good sanity check.
 
 
 
