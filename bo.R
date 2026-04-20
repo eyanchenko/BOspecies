@@ -2,6 +2,8 @@
 # Eric Yanchenko
 # March 6, 2026
 library(extraDistr)
+library(rdist)
+library(emdist)
 
 # Computes the kernel matrix
 # Uses exponential kernel where distance is EMD
@@ -130,7 +132,6 @@ AEI <- function(xstar, X, Y, ystar, beta0, sigma2, K, weights=c("equal", "loc"),
 
 # Greedy function to maximize AEI
 greedy <- function(locs, X, Y, V, k, ystar, beta0, sigma2, K, weights, W, lambda, rho){
-  
   
   # True if candidate set, x, has already been evaluated. False otherwise
   # Could probably figure out a way to speed this up
@@ -266,7 +267,7 @@ bayesopt <- function(f, locs, k, weights=c("equal", "loc"), N0=5, B=20, lambda=1
 L = 500
 locs <- matrix(runif(2*L, -1, 1), nrow=L, ncol=2)
 
-# Crazy objective function
+# Objective function
 f <- function(x){
   -sin(12*x[1,1])*x[1,1]*x[2,1] + 0.5*x[1,1]^3*x[2,2] + sin(6*x[1,2]*x[2,2]) - x[2,1]*x[1,2]^4 +
     cos(x[3,1]*x[3,2])*x[1,2] + rnorm(1, 0, 0.01)
@@ -274,20 +275,24 @@ f <- function(x){
 
 
 
-f(locs[sample(1:L, 3), ])
-
 k = 3 # number of sites considered in each set
 
-
+# Run algorithm
 out <- bayesopt(f, locs, 3, "loc", N0=5, B=25)
+
+# Objective function value at optimal set
 f(out$xstar)
+
+# Trajectory of optimal value
 plot(out$y, type="l")
 
 
-x <- numeric(10); for(i in 1:10){x[i] <- f(bayesopt(f, locs, 3, "loc", N0=5, B=10)$xstar)}; mean(x) # Optimal input
-z <- numeric(100); for(i in 1:100){z[i] <- f(locs[sample(1:L, k),])}; mean(z) # Average over random inputs
+# Comparison with random guessing
+x <- numeric(10); for(i in 1:10){x[i] <- f(bayesopt(f, locs, 3, "loc", N0=5, B=10)$xstar)} # Optimal input
+z <- numeric(100); for(i in 1:100){z[i] <- f(locs[sample(1:L, k),])} # Average over random inputs
 
-# So we are doing significantly better than random guessing. Good sanity check.
+# Significantly better than random guessing
+mean(x); mean(z)
 
 
 
