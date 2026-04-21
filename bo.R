@@ -131,7 +131,11 @@ AEI <- function(xstar, X, Y, ystar, beta0, sigma2, K, weights=c("equal", "loc"),
 }
 
 # Greedy function to maximize AEI
-greedy <- function(locs, X, Y, V, k, ystar, beta0, sigma2, K, weights, W, lambda, rho){
+# D is all pair-wise distances
+# dmax is the maximum distance from current point to consider
+# this could even be adaptive throughout the algorithm
+
+greedy <- function(locs, X, Y, V, D, dmin, k, ystar, b0, sigma2, K, weights, W, lambda, rho){
   
   # True if candidate set, x, has already been evaluated. False otherwise
   # Could probably figure out a way to speed this up
@@ -159,10 +163,17 @@ greedy <- function(locs, X, Y, V, k, ystar, beta0, sigma2, K, weights, W, lambda
   while(ind){
     ind = FALSE
     
-    # Swap ith site with all other sites and keep largest
+    # Swap ith site with other sites and keep largest
     for(i in 1:k){
+      
+      # Only look at sites that are greater than distance dmax of current site
+      idx <- (1:L)[D[i,] > dmin]
+      
+      # Remove other sites currently in the optimum set
+      idx <- idx[!(idx%in% xstar_id)]
+      
       # Randomize order
-      idx <- sample((1:L)[-xstar_id] )
+      idx <- sample(idx)
       
       for(j in idx){
         xtry <- xstar
@@ -192,10 +203,12 @@ greedy <- function(locs, X, Y, V, k, ystar, beta0, sigma2, K, weights, W, lambda
 # Main algorithm
 # f is objective function. Make sure inputs for it work lol
 # This seems to work!
-bayesopt <- function(f, locs, k, weights=c("equal", "loc"), N0=5, B=20, lambda=1, rho=1, mc_burn=1000, mc_iters=5000){
+bayesopt <- function(f, locs, k, weights=c("equal", "loc"), N0=5, B=20, lambda=1, rho=1, dmin=1, mc_burn=1000, mc_iters=5000){
   
   L = nrow(locs) # total number of locations
   p = ncol(locs) # number of covariates at each site
+  
+  D = as.matrix(rdist(locs)) # Pair-wise distance between all locations
   
   # Initial random sample
   X <- list() # keeps track of covariates of sampled places
@@ -226,7 +239,7 @@ bayesopt <- function(f, locs, k, weights=c("equal", "loc"), N0=5, B=20, lambda=1
     ystar <- max(unlist(lapply(X, function(xxx){mean_cov(xxx, X, Y, b0, sigma2, K, weights, W, lambda, rho)$mu})))
     
     # Find set of locations which maximize AEI
-    out <- greedy(locs, X, Y, V, k, ystar, b0, sigma2, K, weights, W, lambda, rho)
+    out <- greedy(locs, X, Y, V, D, dmin, k, ystar, b0, sigma2, K, weights, W, lambda, rho)
     xstar = out$xstar
     xstar_id = out$id
     
@@ -244,7 +257,7 @@ bayesopt <- function(f, locs, k, weights=c("equal", "loc"), N0=5, B=20, lambda=1
     rownames(K) <- NULL
     
     W[[N0+b]] <- Wstar
-    print(b)
+    #print(b)
   }
   
   # Select largest value
@@ -275,13 +288,53 @@ f <- function(x){
 
 
 
-k = 3 # number of sites considered in each set
+k = 5 # number of sites considered in each set
 
 # Run algorithm
-out <- bayesopt(f, locs, 3, "loc", N0=5, B=25)
+system.time(out <- bayesopt(f, locs, k, "equal", N0=5, B=20, dmin=1))
 
 # Objective function value at optimal set
 f(out$xstar)
+
+# Compare computation time and objective function value for different values of dmax
+n.iters = 10
+d.seq <- seq(0, 2, 0.5)
+
+df <- tibble(iter = rep(1:n.iters, length(d.seq)),
+             dmin = rep(d.seq, each=n.iters),
+             time = 0,
+             obj  = 0)
+
+cnt = 1
+for(d in d.seq){
+  for(iter in 1:n.iters){
+    df[cnt, 3] <- system.time(out <- bayesopt(f, locs, k, "equal", N0=5, B=20, dmin=d))[3]
+    df[cnt, 4] <- f(out$xstar)
+    print(iter)
+    cnt = cnt + 1
+    View(df)
+  }
+  print(d)
+}
+
+df_plot <- df %>% group_by(d) %>% summarize(time = mean(time), value = mean(obj))
+
+ggplot(df_plot, aes(x=d, y=obj))+
+  geom_point()+
+  geom_line()+
+  xlab("Minimum distance")+
+  ylab("Objective function value")+
+  theme_minimal()
+
+ggplot(df_plot, aes(x=d, y=time))+
+  geom_point()+
+  geom_line()+
+  xlab("Minimum distance")+
+  ylab("Time (sec)")+
+  theme_minimal()
+
+
+
 
 # Trajectory of optimal value
 plot(out$y, type="l")
