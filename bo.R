@@ -166,7 +166,8 @@ greedy <- function(locs, X, Y, V, D, dmin, k, ystar, b0, sigma2, K, weights, W, 
     # Swap ith site with other sites and keep largest
     for(i in 1:k){
       
-      # Only look at sites that are greater than distance dmax of current site
+      ####################### THIS PART IS NEW ####################
+      # Only look at sites that are greater than distance dmin from current site
       idx <- (1:L)[D[i,] > dmin]
       
       # Remove other sites currently in the optimum set
@@ -174,6 +175,7 @@ greedy <- function(locs, X, Y, V, D, dmin, k, ystar, b0, sigma2, K, weights, W, 
       
       # Randomize order
       idx <- sample(idx)
+      ############################################################# 
       
       for(j in idx){
         xtry <- xstar
@@ -288,7 +290,7 @@ f <- function(x){
 
 
 
-k = 5 # number of sites considered in each set
+k = 3 # number of sites considered in each set
 
 # Run algorithm
 system.time(out <- bayesopt(f, locs, k, "equal", N0=5, B=20, dmin=1))
@@ -297,8 +299,8 @@ system.time(out <- bayesopt(f, locs, k, "equal", N0=5, B=20, dmin=1))
 f(out$xstar)
 
 # Compare computation time and objective function value for different values of dmax
-n.iters = 10
-d.seq <- seq(0, 2, 0.5)
+n.iters = 50
+d.seq <- seq(0, 2, 0.25)
 
 df <- tibble(iter = rep(1:n.iters, length(d.seq)),
              dmin = rep(d.seq, each=n.iters),
@@ -308,25 +310,28 @@ df <- tibble(iter = rep(1:n.iters, length(d.seq)),
 cnt = 1
 for(d in d.seq){
   for(iter in 1:n.iters){
-    df[cnt, 3] <- system.time(out <- bayesopt(f, locs, k, "equal", N0=5, B=20, dmin=d))[3]
+    df[cnt, 3] <- system.time(out <- bayesopt(f, locs, 5, "equal", N0=5, B=20, dmin=d))[3]
     df[cnt, 4] <- f(out$xstar)
     print(iter)
     cnt = cnt + 1
-    View(df)
+    save(df, file = "~/Documents/Research/BOspecies/dmin.RData")
   }
   print(d)
 }
 
-df_plot <- df %>% group_by(d) %>% summarize(time = mean(time), value = mean(obj))
+load("~/Documents/Research/BOspecies/dmin.RData")
 
-ggplot(df_plot, aes(x=d, y=obj))+
+df_plot <- df %>% group_by(dmin) %>% summarize(value = mean(obj), time = mean(time))
+
+ggplot(df_plot, aes(x=dmin, y=value))+
   geom_point()+
   geom_line()+
+  ylim(0,2)+
   xlab("Minimum distance")+
-  ylab("Objective function value")+
+  ylab("Objective function")+
   theme_minimal()
 
-ggplot(df_plot, aes(x=d, y=time))+
+ggplot(df_plot, aes(x=dmin, y=time))+
   geom_point()+
   geom_line()+
   xlab("Minimum distance")+
@@ -338,14 +343,6 @@ ggplot(df_plot, aes(x=d, y=time))+
 
 # Trajectory of optimal value
 plot(out$y, type="l")
-
-
-# Comparison with random guessing
-x <- numeric(10); for(i in 1:10){x[i] <- f(bayesopt(f, locs, 3, "loc", N0=5, B=10)$xstar)} # Optimal input
-z <- numeric(100); for(i in 1:100){z[i] <- f(locs[sample(1:L, k),])} # Average over random inputs
-
-# Significantly better than random guessing
-mean(x); mean(z)
 
 
 
